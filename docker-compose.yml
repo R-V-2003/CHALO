@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  chalo:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - chalo-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+    restart: unless-stopped
+
+volumes:
+  chalo-data:

@@ -1,0 +1,324 @@
+// Shuttle Dashboard — Interactive Map Portal for Drivers (Frame 2 Match)
+import { icons } from '../utils/icons.js';
+import { router } from '../utils/router.js';
+import { locationService } from '../services/location.js';
+import { api } from '../api.js';
+import { storage } from '../utils/storage.js';
+import { showToast } from '../utils/toast.js';
+import { openDrawer, createDrawer } from '../components/drawer.js';
+
+let driverMap = null;
+let driverPosMarker = null;
+let mapLayers = [];
+
+export function createShuttleDashboardScreen() {
+  const user = storage.get('user');
+  if (!user || user.role !== 'shuttle') {
+    router.navigate('login');
+    return document.createElement('div');
+  }
+
+  const screen = document.createElement('div');
+  screen.className = 'screen map-screen shuttle-dashboard-screen';
+  screen.id = 'shuttle-dashboard';
+
+  const avatarHtml = user.profile_photo 
+    ? `<img src="${user.profile_photo}" alt="Driver" style="width:100%;height:100%;object-fit:cover;" />`
+    : icons.driverPhoto;
+
+  screen.innerHTML = `
+    <div id="shuttle-map-container" style="width:100%;height:100%;z-index:1;"></div>
+    
+    <div class="map-header">
+      <button class="btn-profile" id="driver-drawer-btn" aria-label="Menu" style="flex-direction:row;align-items:center;">
+        <div class="btn-profile-circle" style="padding:0;overflow:hidden;display:flex;">${avatarHtml}</div>
+        <div style="margin-left:8px;background:white;padding:4px 8px;border-radius:12px;box-shadow:var(--shadow-md);">
+          <div style="font-weight:700;font-size:0.9rem;">${user.name.split(' ')[0]}</div>
+          <div style="font-size:0.7rem;color:var(--text-sec);font-weight:600;">DRIVER</div>
+        </div>
+      </button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-locate" id="driver-recenter" aria-label="Re-center">${icons.crosshair}</button>
+        <button class="btn-locate" id="btn-logout" aria-label="Logout" style="background:#ea4335;">
+          <svg style="width:18px;height:18px;color:white;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="bottom-sheet driver-sheet" id="driver-bottom-sheet">
+      <div class="bottom-sheet-handle" id="driver-sheet-toggle">${icons.chevronDown}</div>
+      <div class="bottom-sheet-content" id="driver-routes-content">
+        <div style="text-align:center;padding:20px;"><div class="map-loading-spinner" style="margin:0 auto;"></div></div>
+      </div>
+    </div>
+  `;
+
+  setTimeout(() => initDriverMap(screen, user), 100);
+  return screen;
+}
+
+async function initDriverMap(screen, user) {
+  const mapEl = screen.querySelector('#shuttle-map-container');
+  if (!mapEl || typeof L === 'undefined') return;
+
+  const pos = locationService.getPosition();
+  driverMap = L.map(mapEl, { zoomControl: false, attributionControl: false }).setView([pos.lat, pos.lng], 14);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(driverMap);
+
+  // Add the driver's own glowing position dot
+  const el = L.divIcon({
+    className: '',
+    html: '<div class="user-marker"><div class="user-marker-pulse"></div><div class="user-marker-dot" style="background:var(--green-dark);"></div></div>',
+    iconSize: [40, 40], iconAnchor: [20, 20],
+  });
+  driverPosMarker = L.marker([pos.lat, pos.lng], { icon: el, zIndexOffset: 1000 }).addTo(driverMap);
+  locationService.onUpdate(p => {
+    if (driverPosMarker) driverPosMarker.setLatLng([p.lat, p.lng]);
+  });
+
+  // Events
+  screen.querySelector('#driver-drawer-btn')?.addEventListener('click', () => {
+    openDrawer();
+  });
+
+  screen.querySelector('#driver-recenter')?.addEventListener('click', () => {
+    const p = locationService.getPosition();
+    driverMap.flyTo([p.lat, p.lng], 14, { duration: 0.8 });
+  });
+
+  screen.querySelector('#btn-logout')?.addEventListener('click', () => {
+    storage.remove('auth_token');
+    storage.remove('user');
+    router.navigate('splash');
+  });
+
+  // Ensure drawer exists
+  if (!document.querySelector('.drawer')) {
+    const { overlay, drawer } = createDrawer();
+    document.body.appendChild(overlay);
+    document.body.appendChild(drawer);
+  }
+
+  const sheet = screen.querySelector('#driver-bottom-sheet');
+  const toggle = screen.querySelector('#driver-sheet-toggle');
+  toggle?.addEventListener('click', () => {
+    const isCollapsed = sheet.classList.toggle('collapsed');
+    toggle.innerHTML = isCollapsed ? icons.chevronUp : icons.chevronDown;
+  });
+
+  await loadDashboardState(screen, user);
+}
+
+async function loadDashboardState(screen, user) {
+  const content = screen.querySelector('#driver-routes-content');
+  clearMapLayers();
+
+  try {
+    // Refresh user context precisely
+    const freshUser = await api.getMe();
+    storage.set('user', freshUser);
+    Object.assign(user, freshUser);
+
+    if (user.active_route_id) {
+      const activeRoute = await api.getRoute(user.active_route_id);
+      drawActiveRouteOnMap(activeRoute);
+      renderActiveTripSheet(content, activeRoute, screen);
+    } else {
+      const allRoutes = await api.getRoutes();
+      drawPreviewPathsOnMap(allRoutes);
+      renderOfflineRouteSelection(content, allRoutes, screen);
+    }
+  } catch (err) {
+    console.error('Driver dashboard error:', err);
+    content.innerHTML = '<div style="color:red;padding:20px;text-align:center;font-weight:700;">Connection Error</div>';
+  }
+}
+
+function clearMapLayers() {
+  mapLayers.forEach(l => {
+    if (driverMap) driverMap.removeLayer(l);
+  });
+  mapLayers = [];
+}
+
+function drawPreviewPathsOnMap(routes) {
+  routes.forEach(route => {
+    if (!route.path || route.path.length < 2) return;
+    const polyline = L.polyline(route.path, {
+      color: route.color || '#4285F4', weight: 3, opacity: 0.4, dashArray: '5 5'
+    }).addTo(driverMap);
+    mapLayers.push(polyline);
+  });
+}
+
+function drawActiveRouteOnMap(route) {
+  if (!route.path || route.path.length < 2) return;
+
+  // Embolden the primary driven line
+  const polyline = L.polyline(route.path, {
+    color: '#22A147', weight: 6, opacity: 0.9, smoothFactor: 1
+  }).addTo(driverMap);
+  mapLayers.push(polyline);
+
+  // Mark all stops with actual pins
+  route.stops.forEach((stop, i) => {
+    const stopIcon = L.divIcon({
+      className: '',
+      html: `<div style="width:24px;height:24px;background:white;border:3px solid var(--green-dark);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;box-shadow:0 3px 6px rgba(0,0,0,0.2);">${i+1}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    const stopMarker = L.marker([stop.lat, stop.lng], { icon: stopIcon }).addTo(driverMap);
+    mapLayers.push(stopMarker);
+  });
+
+  // Recenter map exactly onto this journey
+  driverMap.flyToBounds(polyline.getBounds(), { padding: [40, 40], duration: 1.2 });
+
+  // SPAWN MOCKED ACTIVE PASSENGERS ON THIS ROUTE!
+  spawnMockPassengers(route.path);
+}
+
+function spawnMockPassengers(pathCoordinates) {
+  if (!pathCoordinates || pathCoordinates.length < 5) return;
+  const numPassengers = Math.floor(Math.random() * 3) + 2; // 2 to 4 random passengers
+
+  for (let i = 0; i < numPassengers; i++) {
+    // Pick a random vertex somewhere along the path
+    const randomIdx = Math.floor(Math.random() * (pathCoordinates.length - 2)) + 1;
+    let [lat, lng] = pathCoordinates[randomIdx];
+    
+    // Jitter coordinates slightly sideways to look like they are waiting "on the curb"
+    lat += (Math.random() - 0.5) * 0.0004;
+    lng += (Math.random() - 0.5) * 0.0004;
+
+    const passengerIcon = L.divIcon({
+      className: '',
+      html: `
+        <div style="width:40px;height:40px;background:var(--white);border-radius:50%;box-shadow:var(--shadow-md);border:2px solid var(--yellow-cta);overflow:hidden;animation: bounce 2s infinite ease-in-out;">
+          ${icons.illustrationPassenger}
+        </div>
+      `,
+      iconSize: [40, 40], iconAnchor: [20, 40] // Anchored at bottom
+    });
+    
+    const pm = L.marker([lat, lng], { icon: passengerIcon, zIndexOffset: 2000 }).addTo(driverMap);
+    mapLayers.push(pm);
+  }
+
+  // Inject a tiny bit of CSS for the bounce specifically for these markers
+  if (!document.getElementById('passenger-bounce-style')) {
+    const style = document.createElement('style');
+    style.id = 'passenger-bounce-style';
+    style.innerHTML = `@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); }}`;
+    document.head.appendChild(style);
+  }
+}
+
+function renderOfflineRouteSelection(container, routes, screen) {
+  container.innerHTML = `
+    <div style="margin-bottom:24px;padding:8px 8px 0;">
+      <h2 style="font-size:1.6rem;font-weight:900;color:var(--text);letter-spacing:-0.5px;">Ready to drive?</h2>
+      <p style="color:var(--text-sec);font-size:0.95rem;margin-top:6px;font-weight:500;">Select an existing route to start matching with passengers on the map.</p>
+    </div>
+
+    <button id="btn-create-route" style="width:100%;padding:18px;background:var(--white);color:var(--text);border:none;border-radius:var(--r-xl);box-shadow:var(--shadow-md);margin-bottom:28px;transition:transform 200ms ease;">
+      <div style="display:flex;align-items:center;justify-content:center;gap:12px;font-size:1.1rem;font-weight:800;">
+        <span style="font-size:1.4rem;">📍</span> Trace a New Route
+      </div>
+    </button>
+
+    <div style="font-size:0.8rem;font-weight:800;color:var(--text);text-transform:uppercase;margin-bottom:12px;padding:0 8px;letter-spacing:1px;opacity:0.7;">Routes in City</div>
+    <div style="display:flex;flex-direction:column;gap:12px;padding-bottom:16px;">
+      ${routes.map(r => `
+        <div class="stop-card" style="border:none;background:var(--white);box-shadow:var(--shadow-sm);border-left:6px solid ${r.color||'var(--yellow)'};padding:16px;">
+          <div class="stop-card-info">
+            <div style="font-weight:800;font-size:1.1rem;color:var(--text);line-height:1.2;margin-bottom:4px;">${r.name}</div>
+            <div style="display:flex;gap:14px;font-size:0.85rem;color:var(--text-sec);font-weight:600;">
+              <span>${r.stop_count} Stops</span>
+              <span>₹${r.fare} Fare</span>
+            </div>
+          </div>
+          <button class="start-route-btn" data-id="${r.id}" style="background:var(--green-dark);color:white;padding:12px 24px;border-radius:16px;font-weight:800;font-size:0.95rem;box-shadow:var(--shadow-sm);transition:transform 150ms;">
+            START
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  document.getElementById('btn-create-route')?.addEventListener('click', () => {
+    router.navigate('add-route');
+  });
+
+  container.querySelectorAll('.start-route-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const routeId = parseInt(btn.dataset.id);
+      btn.style.transform = 'scale(0.95)';
+      btn.textContent = '...';
+      try {
+        await api.setShuttleRoute(routeId);
+        showToast('You are now active online! 🛺');
+        loadDashboardState(screen, storage.get('user')); // Live re-render
+      } catch (err) {
+        showToast('Failed to assign route');
+        btn.textContent = 'START';
+        btn.style.transform = 'scale(1)';
+      }
+    });
+  });
+}
+
+function renderActiveTripSheet(container, route, screen) {
+  container.innerHTML = `
+    <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:20px;">
+      
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="display:inline-block;padding:6px 12px;background:rgba(34,161,71,0.1);color:var(--green-dark);border-radius:10px;font-weight:900;font-size:0.75rem;letter-spacing:1.5px;margin-bottom:12px;text-transform:uppercase;">
+            ● ON-DUTY
+          </div>
+          <div style="font-size:1.5rem;font-weight:900;color:var(--text);line-height:1.1;letter-spacing:-0.5px;">${route.name}</div>
+        </div>
+        <div style="text-align:right;background:var(--bg);padding:12px 16px;border-radius:var(--r-md);border:1px solid var(--border);">
+          <div style="font-size:0.7rem;font-weight:800;color:var(--text-sec);text-transform:uppercase;margin-bottom:2px;">Fare</div>
+          <div style="font-weight:900;font-size:1.6rem;color:var(--green-darker);line-height:1;">₹${route.fare}</div>
+        </div>
+      </div>
+      
+      <div style="background:var(--bg);border-radius:var(--r-md);padding:16px;border:1px solid var(--border);">
+        <div style="font-size:0.75rem;font-weight:800;color:var(--text-sec);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;">Navigation Plan</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${route.stops.slice(0,3).map((s,i) => `
+            <div style="display:flex;align-items:center;gap:14px;">
+              <div style="width:28px;height:28px;background:var(--white);border:2.5px solid var(--green-dark);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:var(--text);flex-shrink:0;">${i+1}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-weight:800;font-size:1rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+              </div>
+              <div style="font-size:0.8rem;font-weight:700;color:var(--text-sec);background:var(--white);padding:4px 8px;border-radius:8px;border:1px solid var(--border);">${s.distance_label}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <button id="end-trip-btn" style="width:100%;padding:20px;background:#EA4335;color:white;font-weight:900;font-size:1.1rem;border-radius:var(--r-xl);box-shadow:0 8px 24px rgba(234,67,53,0.3);border:none;cursor:pointer;transition:transform 200ms ease;display:flex;align-items:center;justify-content:center;gap:12px;">
+        <svg style="width:24px;height:24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+        GO OFFLINE
+      </button>
+    </div>
+  `;
+
+  document.getElementById('end-trip-btn')?.addEventListener('click', async (e) => {
+    e.target.style.transform = 'scale(0.95)';
+    e.target.textContent = 'ENDING...';
+    try {
+      await api.setShuttleRoute(null);
+      showToast('You are safely offline.');
+      loadDashboardState(screen, storage.get('user')); // Live re-render
+    } catch (err) {
+      showToast('Failed to end trip');
+      e.target.style.transform = 'scale(1)';
+      e.target.textContent = 'END TRIP / GO OFFLINE';
+    }
+  });
+}

@@ -1,0 +1,22 @@
+{
+  "name": "CHALO",
+  "short_name": "CHALO",
+  "description": "Find shared auto-rickshaws near you in real-time",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#22A147",
+  "theme_color": "#22A147",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
