@@ -14,9 +14,11 @@ class LocationService {
   }
 
   async requestPermission() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        resolve({ lat: this.lat, lng: this.lng });
+        // Geolocation not supported — treat as denied
+        this.hasPermission = false;
+        reject(new Error('Geolocation is not supported by this browser'));
         return;
       }
 
@@ -28,9 +30,16 @@ class LocationService {
           this.startWatching();
           resolve({ lat: this.lat, lng: this.lng });
         },
-        () => {
-          // Permission denied or error — use default
-          resolve({ lat: this.lat, lng: this.lng });
+        (err) => {
+          // Permission denied or error
+          this.hasPermission = false;
+          if (err.code === 1) {
+            // PERMISSION_DENIED
+            resolve({ lat: this.lat, lng: this.lng, denied: true });
+          } else {
+            // POSITION_UNAVAILABLE or TIMEOUT
+            resolve({ lat: this.lat, lng: this.lng, denied: true });
+          }
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );

@@ -1,0 +1,16 @@
+{
+  "appId": "com.chalo.app",
+  "appName": "Chalo",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "Geolocation": {
+      "permissions": ["location"]
+    }
+  }
+}

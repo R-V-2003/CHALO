@@ -90,6 +90,7 @@ async function initDriverMap(screen, user) {
   screen.querySelector('#btn-logout')?.addEventListener('click', () => {
     storage.remove('auth_token');
     storage.remove('user');
+    window.dispatchEvent(new Event('chalo-auth-change'));
     router.navigate('splash');
   });
 

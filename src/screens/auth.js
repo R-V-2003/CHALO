@@ -103,6 +103,9 @@ export function createAuthScreen(isLogin = true) {
         storage.set('auth_token', act.token);
         storage.set('user', act.user);
         
+        // Notify chat widget that auth state changed
+        window.dispatchEvent(new Event('chalo-auth-change'));
+        
         showToast(isLogin ? 'Logged in successfully!' : 'Account created!');
         
         // Route correctly

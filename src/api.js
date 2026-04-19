@@ -1,6 +1,8 @@
 // API Client — all data comes from the backend
 import { storage } from './utils/storage.js';
-const BASE = '';  // Same origin in production, proxied in dev
+
+// Absolute URL needed for APK/Mobile apps. Defaults to same-origin for web deployment.
+const BASE = import.meta.env.VITE_API_BASE_URL || ''; 
 
 async function request(path, options = {}) {
   try {
@@ -54,6 +56,9 @@ export const api = {
 
   // Shuttle Specific
   setShuttleRoute: (routeId) => request('/api/auth/shuttle/route', { method: 'POST', body: JSON.stringify({ routeId }) }),
+
+  // AI Smart Navigation Chat
+  chat: (message, history = []) => request('/api/chat', { method: 'POST', body: JSON.stringify({ message, history }) }),
 
   // Health
   health: () => request('/api/health')

@@ -1,7 +1,8 @@
 // CHALO Backend Server
+const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 
 // Initialize database (creates tables + seeds data)
 require('./db');
@@ -19,6 +20,9 @@ app.use('/api/routes', require('./routes/apiRoutes'));
 app.use('/api/drivers', require('./routes/apiDrivers'));
 app.use('/api/reviews', require('./routes/apiReviews'));
 app.use('/api/stops', require('./routes/apiStops'));
+
+// AI Chat
+app.use('/api/chat', require('./routes/apiChat'));
 
 // Health check
 app.get('/api/health', (req, res) => {

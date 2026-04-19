@@ -16,6 +16,7 @@ import {
   createFAQsScreen,
   createSetRouteScreen
 } from './screens/secondary.js';
+import { createChatWidget } from './components/chatWidget.js';
 
 // Register screens
 router.register('login', () => createAuthScreen(true));
@@ -36,6 +37,7 @@ router.register('set-route', () => createSetRouteScreen());
 // Start
 document.addEventListener('DOMContentLoaded', () => {
   router.navigate('splash');
+  createChatWidget();
 });
 
 // PWA

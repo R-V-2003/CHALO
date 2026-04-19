@@ -1,7 +1,8 @@
-// Side Drawer — Frame 2 exact + Add Route
+// Side Drawer — Frame 2 exact + Add Route + Logout
 import { icons } from '../utils/icons.js';
 import { router } from '../utils/router.js';
 import { storage } from '../utils/storage.js';
+import { showToast } from '../utils/toast.js';
 
 let drawerEl = null;
 let overlayEl = null;
@@ -54,6 +55,11 @@ export function createDrawer() {
       <div class="drawer-menu-item" data-page="settings">${icons.settings}<span>Settings</span></div>
       <div class="drawer-menu-item" data-page="support">${icons.support}<span>Support</span></div>
       <div class="drawer-menu-item" data-page="faqs">${icons.faq}<span>FAQs</span></div>
+      <div class="drawer-divider" style="margin:8px 0;"></div>
+      <div class="drawer-menu-item drawer-logout-btn" id="drawer-logout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#EA4335;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span style="color:#EA4335;font-weight:700;">Logout</span>
+      </div>
     </nav>
     <div class="drawer-footer">
       <div class="drawer-footer-item">
@@ -75,12 +81,25 @@ export function createDrawer() {
 
   overlayEl.addEventListener('click', closeDrawer);
 
-  drawerEl.querySelectorAll('.drawer-menu-item').forEach(item => {
+  drawerEl.querySelectorAll('.drawer-menu-item[data-page]').forEach(item => {
     item.addEventListener('click', () => {
       const page = item.dataset.page;
       closeDrawer();
       setTimeout(() => router.navigate(page), 300);
     });
+  });
+
+  // Logout handler
+  drawerEl.querySelector('#drawer-logout')?.addEventListener('click', () => {
+    closeDrawer();
+    setTimeout(() => {
+      storage.remove('auth_token');
+      storage.remove('user');
+      storage.remove('favorite_routes');
+      window.dispatchEvent(new Event('chalo-auth-change'));
+      showToast('Logged out successfully');
+      router.navigate('login');
+    }, 300);
   });
 
   return { overlay: overlayEl, drawer: drawerEl };
