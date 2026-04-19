@@ -108,7 +108,63 @@ async function initMap(screen, params) {
     document.body.appendChild(drawer);
   }
 
+  // Handle navigation requests from Chat
+  window.addEventListener('chalo-start-nav', (e) => {
+    const { route, walk, fare } = e.detail;
+    
+    let matchedRoute = null;
+    if (route && routesData.length) {
+      matchedRoute = routesData.find(r => r.name.toLowerCase() === route.toLowerCase());
+    }
+    
+    if (matchedRoute) {
+      // 1. Expand the bottom sheet if collapsed
+      if (bottomSheet && bottomSheet.classList.contains('collapsed')) {
+        bottomSheet.classList.remove('collapsed');
+        if (sheetToggle) sheetToggle.innerHTML = icons.chevronDown;
+      }
+      
+      // 2. Select and show the route
+      selectedRouteId = matchedRoute.id;
+      showExpandedRoute(screen, matchedRoute, routesData);
+      
+      // 3. Show Walk Toast if walk info exists
+      if (walk) {
+        showNavToast(`Walk ${walk}`, `Fare: ${fare || '₹10'}`);
+      }
+    }
+  });
+
   startAutoAnimation();
+}
+
+function showNavToast(title, text) {
+  let toast = document.getElementById('nav-walk-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'nav-walk-toast';
+    toast.className = 'nav-walk-toast';
+    toast.innerHTML = `
+      <div class="nav-walk-toast-icon">🚶</div>
+      <div class="nav-walk-toast-content">
+        <div class="nav-walk-toast-title"></div>
+        <div class="nav-walk-toast-text"></div>
+      </div>
+    `;
+    const mapScreen = document.getElementById('map-screen');
+    if (mapScreen) mapScreen.appendChild(toast);
+  }
+  
+  toast.querySelector('.nav-walk-toast-title').textContent = title;
+  toast.querySelector('.nav-walk-toast-text').textContent = text;
+  
+  toast.classList.remove('show');
+  void toast.offsetWidth; // force reflow
+  toast.classList.add('show');
+  
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 5000);
 }
 
 function addUserMarker(lat, lng) {
